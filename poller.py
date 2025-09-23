@@ -1,4 +1,5 @@
-import time, os, json, sys
+# poller.py
+import time, os, json
 from datetime import datetime
 import pandas as pd
 
@@ -7,9 +8,11 @@ from config import (
     STAFF_CSV, ONCALL_CSV, UPDATES_CSV, STATE_JSON
 )
 
-# --- WhatsApp sender (Twilio) ---
-def send_whatsapp(to_number: str, text: str):
-    """Send WhatsApp message via Twilio. Falls back to print if creds missing."""
+# ---------------- WhatsApp (Twilio) ----------------
+def send_whatsapp(to_number: str, text: str) -> bool:
+    """
+    يرسل واتساب عبر Twilio. إذا مفاتيح Twilio غير مضبوطة، يطبع الرسالة كمحاكاة.
+    """
     if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM):
         print(f"[SIMULATE SEND] to={to_number} :: {text}")
         return True
@@ -28,7 +31,7 @@ def send_whatsapp(to_number: str, text: str):
         print("[ERROR sending WhatsApp]", e)
         return False
 
-# --- Helpers ---
+# ---------------- Helpers ----------------
 def load_state():
     if not os.path.exists(STATE_JSON):
         return {"last_ts": "", "last_row": 0}
@@ -50,8 +53,7 @@ def load_csv(path, required_cols):
 
 def normalize_phone(p):
     if pd.isna(p): return ""
-    s = str(p).strip()
-    s = s.replace(" ", "")
+    s = str(p).strip().replace(" ", "")
     if s.startswith("whatsapp:"):
         s = s[len("whatsapp:"):]
     return s
@@ -59,8 +61,9 @@ def normalize_phone(p):
 def now_iso():
     return datetime.now().isoformat(timespec="seconds")
 
-# --- Core ---
+# ---------------- Core ----------------
 def run_once():
+    # staff & oncall
     staff = load_csv(STAFF_CSV, ["name", "department", "phone", "role", "authorized"])
     staff["phone"] = staff["phone"].map(normalize_phone)
     staff["authorized"] = staff["authorized"].fillna(0).astype(int)
@@ -68,41 +71,41 @@ def run_once():
     oncall = load_csv(ONCALL_CSV, ["department", "phone"])
     oncall["phone"] = oncall["phone"].map(normalize_phone)
 
-    # Map: department -> set of authorized on-call numbers
+    # department -> authorized on-call numbers
     auth_numbers = set(staff.loc[staff["authorized"] == 1, "phone"].dropna().astype(str))
     dep_to_oncall = {}
     for _, row in oncall.iterrows():
-        dep = str(row.get("department","")).strip()
-        ph = str(row.get("phone","")).strip()
-        if not dep or not ph: 
-            continue
-        if ph in auth_numbers:
+        dep = str(row.get("department", "")).strip()
+        ph = str(row.get("phone", "")).strip()
+        if dep and ph and ph in auth_numbers:
             dep_to_oncall.setdefault(dep, set()).add(ph)
 
+    # updates
     updates = load_csv(UPDATES_CSV, ["patient_name", "department", "event", "timestamp"])
 
+    # state
     state = load_state()
     last_ts = state.get("last_ts", "")
     last_row = int(state.get("last_row", 0))
 
+    # determine new rows
     to_process = []
     for idx, row in updates.iterrows():
-        ts = str(row.get("timestamp","")).strip()
+        ts = str(row.get("timestamp", "")).strip()
         try:
-            ts_dt = datetime.fromisoformat(ts.replace("Z",""))
+            ts_dt = datetime.fromisoformat(ts.replace("Z", ""))
             last_dt = datetime.fromisoformat(last_ts) if last_ts else None
             is_new = (last_dt is None) or (ts_dt > last_dt) or (idx > last_row)
         except Exception:
             is_new = idx > last_row
-
         if is_new:
             to_process.append((idx, row))
 
     sent_count = 0
     for idx, row in to_process:
-        patient = str(row.get("patient_name","")).strip()
-        department = str(row.get("department","")).strip()
-        event = str(row.get("event","")).strip()
+        patient = str(row.get("patient_name", "")).strip()
+        department = str(row.get("department", "")).strip()
+        event = str(row.get("event", "")).strip()
 
         if not department:
             print(f"[SKIP idx={idx}] missing department")
@@ -118,6 +121,7 @@ def run_once():
         for ph in targets:
             ok = send_whatsapp(ph, text)
             any_ok = any_ok or ok
+
         if any_ok:
             sent_count += 1
             state["last_ts"] = now_iso()
@@ -130,7 +134,8 @@ def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--interval", type=int, default=60, help="Seconds between polls. Use 0 for no sleep.")
-    ap.add_argument("--run-once", dest="run_once", action="store_true", help="Process once and exit (useful for cron).")
+    ap.add_argument("--run-once", dest="run_once", action="store_true",
+                    help="Process once and exit (useful for cron).")
     args = ap.parse_args()
 
     if args.run_once:

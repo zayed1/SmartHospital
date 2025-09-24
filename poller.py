@@ -1,5 +1,5 @@
 # poller.py
-import time, os, json
+import os, json, time
 from datetime import datetime
 import pandas as pd
 
@@ -7,13 +7,71 @@ from config import (
     TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
     TWILIO_WHATSAPP_FROM,
+    DATA_DIR,
     STAFF_CSV,
     ONCALL_CSV,
     UPDATES_CSV,
     STATE_JSON,
 )
 
-# ---------------- WhatsApp (Twilio) ----------------
+# =================== Utilities ===================
+
+PROCESSED_MEM = set()  # كابح تكرار داخل الذاكرة
+
+def debug(msg: str):
+    print(f"[DEBUG] {msg}")
+
+def to_iso(dt: datetime) -> str:
+    return dt.isoformat(timespec="seconds")
+
+def parse_iso(s: str):
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", ""))
+    except Exception:
+        return None
+
+def load_csv(path, required_cols):
+    if not os.path.exists(path):
+        debug(f"csv not found, creating empty: {path}")
+        return pd.DataFrame(columns=required_cols)
+    df = pd.read_csv(path)
+    for c in required_cols:
+        if c not in df.columns:
+            df[c] = ""
+    return df
+
+def normalize_phone(p):
+    if pd.isna(p): return ""
+    s = str(p).strip().replace(" ", "")
+    if s.startswith("whatsapp:"):
+        s = s[len("whatsapp:"):]
+    return s
+
+# =================== State (JSON) ===================
+
+def load_state():
+    path = STATE_JSON
+    if not os.path.exists(path):
+        debug(f"state file not found, using fresh: {path}")
+        return {"last_ts": "", "last_row": 0, "processed": []}
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    data.setdefault("last_ts", "")
+    data.setdefault("last_row", 0)
+    data.setdefault("processed", [])
+    debug(f"state loaded from {path} | processed={len(data['processed'])} last_ts={data['last_ts']} last_row={data['last_row']}")
+    return data
+
+def save_state(state):
+    path = STATE_JSON
+    # تأكد من وجود مجلد الوجهة إن لزم
+    os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    debug(f"state saved to {path} | processed={len(state.get('processed', []))} last_ts={state.get('last_ts','')} last_row={state.get('last_row',0)}")
+
+# =================== WhatsApp (Twilio) ===================
+
 def send_whatsapp(to_number: str, text: str) -> bool:
     """
     يرسل واتساب عبر Twilio. إذا مفاتيح Twilio غير مضبوطة، يطبع الرسالة كمحاكاة.
@@ -21,7 +79,6 @@ def send_whatsapp(to_number: str, text: str) -> bool:
     if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM):
         print(f"[SIMULATE SEND] to={to_number} :: {text}")
         return True
-
     try:
         from twilio.rest import Client
         client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
@@ -36,58 +93,10 @@ def send_whatsapp(to_number: str, text: str) -> bool:
         print("[ERROR sending WhatsApp]", e)
         return False
 
+# =================== Core ===================
 
-# ---------------- Helpers ----------------
-def load_state():
-    if not os.path.exists(STATE_JSON):
-        return {"last_ts": "", "last_row": 0, "processed": []}
-    with open(STATE_JSON, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    # حقول افتراضية لنسخ قديمة
-    data.setdefault("processed", [])
-    data.setdefault("last_ts", "")
-    data.setdefault("last_row", 0)
-    return data
-
-
-def save_state(state):
-    with open(STATE_JSON, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-
-
-def load_csv(path, required_cols):
-    if not os.path.exists(path):
-        return pd.DataFrame(columns=required_cols)
-    df = pd.read_csv(path)
-    for c in required_cols:
-        if c not in df.columns:
-            df[c] = ""
-    return df
-
-
-def normalize_phone(p):
-    if pd.isna(p):
-        return ""
-    s = str(p).strip().replace(" ", "")
-    if s.startswith("whatsapp:"):
-        s = s[len("whatsapp:"):]
-    return s
-
-
-def to_iso(dt: datetime) -> str:
-    return dt.isoformat(timespec="seconds")
-
-
-def parse_iso(s: str):
-    try:
-        return datetime.fromisoformat(s.replace("Z", ""))
-    except Exception:
-        return None
-
-
-# ---------------- Core ----------------
 def run_once():
-    # موظفون ومناوبون
+    # الموظفون والمناوبون
     staff = load_csv(STAFF_CSV, ["name", "department", "phone", "role", "authorized"])
     staff["phone"] = staff["phone"].map(normalize_phone)
     staff["authorized"] = staff["authorized"].fillna(0).astype(int)
@@ -105,52 +114,58 @@ def run_once():
             dep_to_oncall.setdefault(dep, set()).add(ph)
 
     # التحديثات
-    updates = load_csv(UPDATES_CSV, ["patient_name", "department", "event", "timestamp"])
+    # دعم عمود id إن وُجد
+    updates = load_csv(UPDATES_CSV, ["id", "patient_name", "department", "event", "timestamp"])
 
-    # الحالة المحفوظة
+    # الحالة
     state = load_state()
+    processed = set(state.get("processed", []))
     last_ts = state.get("last_ts", "")
     last_row = int(state.get("last_row", 0))
-    processed = set(state.get("processed", []))
-
     last_dt = parse_iso(last_ts) if last_ts else None
 
-    # تحديد الصفوف الجديدة
+    # دمج مع كاش الذاكرة
+    global PROCESSED_MEM
+    if PROCESSED_MEM:
+        processed |= PROCESSED_MEM
+    PROCESSED_MEM = set(processed)
+
+    # اختيار الصفوف الجديدة
     to_process = []
     for idx, row in updates.iterrows():
-        ts = str(row.get("timestamp", "")).strip()
-        key = f"{str(row.get('patient_name','')).strip()}|{str(row.get('department','')).strip()}|{str(row.get('event','')).strip()}|{ts}"
+        row_id = str(row.get("id", "")).strip()
+        ts_str = str(row.get("timestamp", "")).strip()
+        key = f"id:{row_id}" if row_id else f"{str(row.get('patient_name','')).strip()}|{str(row.get('department','')).strip()}|{str(row.get('event','')).strip()}|{ts_str}"
 
-        # لو سبق معالجته—تجاهله تمامًا (حتى لو التاريخ بالمستقبل)
         if key in processed:
-            continue
+            continue  # سبق معالجته
 
-        ts_dt = parse_iso(ts)
+        ts_dt = parse_iso(ts_str)
         try:
             is_new = (last_dt is None) or (ts_dt and last_dt and ts_dt > last_dt) or (idx > last_row)
         except Exception:
             is_new = idx > last_row
 
         if is_new:
-            to_process.append((idx, row, key, ts_dt, ts))
+            to_process.append((idx, row, key, ts_dt))
 
     sent_count = 0
     max_dt_seen = last_dt
 
-    for idx, row, key, ts_dt, ts_str in to_process:
+    for idx, row, key, ts_dt in to_process:
         patient = str(row.get("patient_name", "")).strip()
         department = str(row.get("department", "")).strip()
         event = str(row.get("event", "")).strip()
 
         if not department:
             print(f"[SKIP idx={idx}] missing department")
-            processed.add(key)  # لا تكرر نفس السطر لاحقًا
+            processed.add(key); PROCESSED_MEM.add(key)
             continue
 
         targets = dep_to_oncall.get(department, set())
         if not targets:
             print(f"[NO ONCALL] department={department} has no authorized on-call")
-            processed.add(key)
+            processed.add(key); PROCESSED_MEM.add(key)
             continue
 
         text = f"📣 تحديث جديد\nالمريض: {patient}\nالقسم: {department}\nالحالة: {event}"
@@ -162,16 +177,17 @@ def run_once():
         if any_ok:
             sent_count += 1
 
-        # علِّم هذا الحدث كمُعالج دائمًا
+        # وسم الحدث كمُعالج دائمًا
         processed.add(key)
+        PROCESSED_MEM.add(key)
 
-        # حدّث مؤشرات الوقت للأمام بشكل آمن
+        # تقدّم مؤشّر الوقت للأمام
         if ts_dt and (max_dt_seen is None or ts_dt > max_dt_seen):
             max_dt_seen = ts_dt
 
         state["last_row"] = max(state.get("last_row", 0), idx)
 
-    # حدّث last_ts لأقصى وقت تمت معالجته (إن وُجد)، وإلا احتفظ بالقديم
+    # تحديث الحالة والحفظ
     if max_dt_seen:
         state["last_ts"] = to_iso(max_dt_seen)
 
@@ -182,8 +198,8 @@ def run_once():
     state["processed"] = list(processed)
     save_state(state)
 
+    debug(f"processed_mem_size={len(PROCESSED_MEM)}")
     print(f"[DONE] processed={len(to_process)} sent={sent_count} at {to_iso(datetime.now())}")
-
 
 def main():
     import argparse
@@ -201,7 +217,6 @@ def main():
         if args.interval <= 0:
             break
         time.sleep(args.interval)
-
 
 if __name__ == "__main__":
     main()

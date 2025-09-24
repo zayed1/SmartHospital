@@ -20,7 +20,8 @@ from config import (
 
 # =================== إعدادات عامة ===================
 PROCESSED_MEM = set()
-DELIVERY_TIMEOUT = int(os.getenv("DELIVERY_TIMEOUT", "8"))  # ثواني انتظار حالة التسليم النهائية
+DELIVERY_TIMEOUT = int(os.getenv("DELIVERY_TIMEOUT", "8"))        # ثواني انتظار حالة التسليم النهائية
+WA_REQUIRE_DELIVERED = int(os.getenv("WA_REQUIRE_DELIVERED", "1"))# 1=نجاح فقط إذا delivered
 
 def debug(msg: str):
     print(f"[DEBUG] {msg}")
@@ -183,7 +184,7 @@ def wait_final_status(client, sid: str, timeout: int = DELIVERY_TIMEOUT):
 def send_whatsapp(to_number: str, text: str, vars_dict: dict = None) -> bool:
     """
     يحاول القالب أولاً (Content API)،
-    ثم يتحقق من حالة التسليم؛ لو فشل/undelivered يرجع False ليعمل fallback.
+    ثم يتحقق من حالة التسليم؛ نجاح فقط إذا delivered (إلا إذا عطّلت WA_REQUIRE_DELIVERED).
     وإلا يسقط إلى free-form داخل نافذة 24 ساعة.
     """
     sid = TWILIO_ACCOUNT_SID
@@ -204,36 +205,38 @@ def send_whatsapp(to_number: str, text: str, vars_dict: dict = None) -> bool:
     else:
         base_kwargs["from_"] = from_num
 
+    def ok(status: str) -> bool:
+        return (status == "delivered") or (not WA_REQUIRE_DELIVERED and status in ("sent", "delivered"))
+
     # 1) جرّب القالب إن متاح
     if content_sid:
         try:
-            kwargs = dict(base_kwargs)
-            kwargs["content_sid"] = content_sid
-            if vars_dict:  # أرسل content_variables فقط إن كان هناك مفاتيح
+            kwargs = dict(base_kwargs, content_sid=content_sid)
+            if vars_dict:
                 kwargs["content_variables"] = json.dumps(vars_dict, ensure_ascii=False)
             msg = client.messages.create(**kwargs)
             status, err_code, err_msg = wait_final_status(client, msg.sid)
-            if status in ("failed", "undelivered"):
-                print("[WA DELIVERY FAIL - template]", status, err_code, err_msg)
-                return False  # يفعّل الـfallback
-            print("[SENT]", msg.sid, "to", to_number, "via template", status)
-            return True
+            if ok(status):
+                print("[SENT]", msg.sid, "to", to_number, "via template", status)
+                return True
+            print("[WA DELIVERY NOT CONFIRMED - template]", status, err_code, err_msg)
+            return False  # فعّل SMS
         except TwilioRestException as e:
             print("[TWILIO TEMPLATE ERROR]", e.status, getattr(e, "code", None), getattr(e, "msg", str(e)))
-            return False  # فشل الإنشاء → فعّل fallback
+            return False
         except Exception as e:
             print("[WA TEMPLATE ERROR]", e)
             return False
 
-    # 2) سقوط إلى free-form (نافذة 24 ساعة فقط)
+    # 2) سقوط إلى free-form (نافذة 24 ساعة)
     try:
         msg = client.messages.create(**base_kwargs, body=text)
         status, err_code, err_msg = wait_final_status(client, msg.sid)
-        if status in ("failed", "undelivered"):
-            print("[WA DELIVERY FAIL - free]", status, err_code, err_msg)
-            return False
-        print("[SENT]", msg.sid, "to", to_number, "via free-form", status)
-        return True
+        if ok(status):
+            print("[SENT]", msg.sid, "to", to_number, "via free-form", status)
+            return True
+        print("[WA DELIVERY NOT CONFIRMED - free]", status, err_code, err_msg)
+        return False
     except TwilioRestException as e2:
         print("[TWILIO FREE-FORM ERROR]", e2.status, getattr(e2, "code", None), getattr(e2, "msg", str(e2)))
         return False

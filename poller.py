@@ -2,9 +2,10 @@
 import os, json, time, tempfile
 from datetime import datetime
 from pathlib import Path
+
 import pandas as pd
 import requests
-
+from twilio.base.exceptions import TwilioRestException
 from config import (
     TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
@@ -31,13 +32,13 @@ def parse_iso(s: str):
     except Exception:
         return None
 
-# =================== GitHub Sync ===================
+# =================== GitHub Sync (optional via env) ===================
 SYNC_UPDATES_URL = os.getenv("SYNC_UPDATES_URL", "").strip()
 SYNC_ONCALL_URL  = os.getenv("SYNC_ONCALL_URL", "").strip()
 SYNC_STAFF_URL   = os.getenv("SYNC_STAFF_URL", "").strip()
 SYNC_TOKEN       = os.getenv("SYNC_TOKEN", "").strip()  # للريبو الخاص (اختياري)
 
-SYNC_META = os.path.join(DATA_DIR, ".sync_meta.json")  # يخزن ETag/Last-Modified
+SYNC_META = os.path.join(DATA_DIR, ".sync_meta.json")  # يخزّن ETag/Last-Modified
 
 def atomic_write(target_path: str, data: bytes):
     Path(os.path.dirname(target_path)).mkdir(parents=True, exist_ok=True)
@@ -135,36 +136,68 @@ def normalize_phone(p):
         s = s[len("whatsapp:"):]
     return s
 
-# =================== WhatsApp (Twilio) ===================
-def send_whatsapp(to_number: str, text: str) -> bool:
-    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_WHATSAPP_FROM):
+# =================== Twilio WhatsApp ===================
+def send_whatsapp(to_number: str, text: str, vars_dict: dict | None = None) -> bool:
+    """
+    يرسل عبر Twilio:
+    - إن كان TWILIO_CONTENT_SID مضبوطًا ومعه vars_dict -> يستخدم القالب (Content API).
+    - لو فشل القالب (مثلاً Under Review) يسقط تلقائيًا إلى free-form.
+    - free-form يعمل فقط إذا كانت جلسة 24 ساعة مفتوحة مع المستلم.
+    """
+    sid = TWILIO_ACCOUNT_SID
+    tok = TWILIO_AUTH_TOKEN
+    svc = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "").strip()
+    from_num = TWILIO_WHATSAPP_FROM
+    content_sid = os.getenv("TWILIO_CONTENT_SID", "").strip()
+
+    if not (sid and tok and (svc or from_num)):
         print(f"[SIMULATE SEND] to={to_number} :: {text}")
         return True
+
+    from twilio.rest import Client
+    client = Client(sid, tok)
+    base_kwargs = {"to": f"whatsapp:{to_number.replace('whatsapp:','')}"}
+    if svc:
+        base_kwargs["messaging_service_sid"] = svc
+    else:
+        base_kwargs["from_"] = from_num
+
+    # 1) القالب (إن متاح)
+    if content_sid and vars_dict:
+        try:
+            r = client.messages.create(
+                **base_kwargs,
+                content_sid=content_sid,
+                content_variables=json.dumps(vars_dict, ensure_ascii=False)
+            )
+            print("[SENT]", r.sid, "to", to_number, "via template")
+            return True
+        except TwilioRestException as e:
+            print("[TWILIO TEMPLATE ERROR]", e.status, getattr(e, "code", None), getattr(e, "msg", str(e)))
+
+    # 2) سقوط إلى free-form
     try:
-        from twilio.rest import Client
-        client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-        msg = client.messages.create(
-            from_=TWILIO_WHATSAPP_FROM,
-            to=f"whatsapp:{to_number.replace('whatsapp:','')}",
-            body=text
-        )
-        print("[SENT]", msg.sid, "to", to_number)
+        r = client.messages.create(**base_kwargs, body=text)
+        print("[SENT]", r.sid, "to", to_number, "via free-form")
         return True
+    except TwilioRestException as e2:
+        print("[TWILIO FREE-FORM ERROR]", e2.status, getattr(e2, "code", None), getattr(e2, "msg", str(e2)))
+        return False
     except Exception as e:
         print("[ERROR sending WhatsApp]", e)
         return False
 
 # =================== Core ===================
 def run_once():
-    # 1) اسحب أحدث الملفات من GitHub إلى /data (إن كانت الروابط مضبوطة)
+    # (اختياري) سحب آخر نسخ من GitHub إلى /data
     fetch_to(UPDATES_CSV, SYNC_UPDATES_URL)
     fetch_to(ONCALL_CSV,  SYNC_ONCALL_URL)
     fetch_to(STAFF_CSV,   SYNC_STAFF_URL)
 
-    # 2) حمّل CSVs
-    staff  = load_csv(STAFF_CSV,  ["name","department","phone","role","authorized"])
-    oncall = load_csv(ONCALL_CSV, ["department","phone"])
-    updates= load_csv(UPDATES_CSV,["id","patient_name","department","event","timestamp"])
+    # حمّل CSVs
+    staff   = load_csv(STAFF_CSV,  ["name","department","phone","role","authorized"])
+    oncall  = load_csv(ONCALL_CSV, ["department","phone"])
+    updates = load_csv(UPDATES_CSV,["id","patient_name","department","event","timestamp"])
 
     staff["phone"] = staff["phone"].map(normalize_phone)
     staff["authorized"] = staff["authorized"].fillna(0).astype(int)
@@ -179,7 +212,7 @@ def run_once():
         if dep and ph and ph in auth_numbers:
             dep_to_oncall.setdefault(dep, set()).add(ph)
 
-    # 3) الحالة
+    # الحالة
     state = load_state()
     processed = set(state.get("processed", []))
     last_ts = state.get("last_ts", "")
@@ -192,7 +225,7 @@ def run_once():
         processed |= PROCESSED_MEM
     PROCESSED_MEM = set(processed)
 
-    # 4) اختر الصفوف الجديدة
+    # اختر الصفوف الجديدة
     to_process = []
     for idx, row in updates.iterrows():
         row_id = str(row.get("id", "")).strip()
@@ -211,7 +244,7 @@ def run_once():
         if is_new:
             to_process.append((idx, row, key, ts_dt))
 
-    # 5) أرسل
+    # أرسل
     sent_count = 0
     max_dt_seen = last_dt
 
@@ -232,10 +265,11 @@ def run_once():
             continue
 
         text = f"📣 تحديث جديد\nالمريض: {patient}\nالقسم: {department}\nالحالة: {event}"
+        vars_dict = {"1": patient, "2": department, "3": event}
 
         any_ok = False
         for ph in targets:
-            ok = send_whatsapp(ph, text)
+            ok = send_whatsapp(ph, text, vars_dict)
             any_ok = any_ok or ok
         if any_ok:
             sent_count += 1

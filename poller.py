@@ -1,47 +1,56 @@
-# poller.py
-import os, json, time, tempfile
+# poller.py — Telegram + Email fan-out with external templates
+# تشغيل:
+#   python poller.py --interval 60
+#
+# المتطلبات:
+#   pip install pandas requests
+
+import os, json, time, tempfile, ssl, smtplib
 from datetime import datetime
 from pathlib import Path
+from email.message import EmailMessage
 
 import pandas as pd
 import requests
-from twilio.base.exceptions import TwilioRestException
 
-from config import (
-    TWILIO_ACCOUNT_SID,
-    TWILIO_AUTH_TOKEN,
-    TWILIO_WHATSAPP_FROM,
-    DATA_DIR,
-    STAFF_CSV,
-    ONCALL_CSV,
-    UPDATES_CSV,
-    STATE_JSON,
-)
+# =========================
+# مسارات وتهيئة افتراضية
+# =========================
+try:
+    # إن كان لديك config.py يُعرّف المسارات، سيؤخذ به
+    from config import DATA_DIR, STAFF_CSV, ONCALL_CSV, UPDATES_CSV, STATE_JSON
+except Exception:
+    DATA_DIR    = os.getenv("DATA_DIR", "data")
+    STAFF_CSV   = os.path.join(DATA_DIR, "staff.csv")
+    ONCALL_CSV  = os.path.join(DATA_DIR, "oncall.csv")
+    UPDATES_CSV = os.path.join(DATA_DIR, "updates.csv")
+    STATE_JSON  = os.getenv("STATE_JSON", os.path.join(DATA_DIR, "state.json"))
 
-# =================== إعدادات عامة ===================
-PROCESSED_MEM = set()
-DELIVERY_TIMEOUT = int(os.getenv("DELIVERY_TIMEOUT", "8"))        # ثواني انتظار حالة التسليم النهائية
-WA_REQUIRE_DELIVERED = int(os.getenv("WA_REQUIRE_DELIVERED", "1"))# 1=نجاح فقط إذا delivered
+TEMPLATES_PATH = os.path.join(DATA_DIR, "templates.json")
+AUDIT_CSV      = os.path.join(DATA_DIR, "audit.csv")
+SYNC_META      = os.path.join(DATA_DIR, ".sync_meta.json")
 
-def debug(msg: str):
-    print(f"[DEBUG] {msg}")
+# قنوات الإرسال المفعّلة (ثابتة افتراضيًا: تلغرام + إيميل)
+CHANNELS = [c.strip() for c in os.getenv("CHANNELS", "telegram,email").split(",") if c.strip()]
 
-def to_iso(dt: datetime) -> str:
-    return dt.isoformat(timespec="seconds")
+# وضع تجريبي — يطبع بدل الإرسال الحقيقي
+DRY_RUN = os.getenv("DRY_RUN", "0").strip() == "1"
 
-def parse_iso(s: str):
-    try:
-        return datetime.fromisoformat(str(s).replace("Z", ""))
-    except Exception:
-        return None
-
-# =================== مزامنة GitHub (اختياري via env) ===================
+# =========================
+# مزامنة CSV من GitHub (اختياري)
+# =========================
 SYNC_UPDATES_URL = os.getenv("SYNC_UPDATES_URL", "").strip()
 SYNC_ONCALL_URL  = os.getenv("SYNC_ONCALL_URL", "").strip()
 SYNC_STAFF_URL   = os.getenv("SYNC_STAFF_URL", "").strip()
-SYNC_TOKEN       = os.getenv("SYNC_TOKEN", "").strip()  # للريبو الخاص
+SYNC_TOKEN       = os.getenv("SYNC_TOKEN", "").strip()
 
-SYNC_META = os.path.join(DATA_DIR, ".sync_meta.json")  # تخزين ETag/Last-Modified
+def build_headers(url: str):
+    headers = {}
+    if SYNC_TOKEN:
+        headers["Authorization"] = f"Bearer {SYNC_TOKEN}"
+    if "api.github.com" in url:
+        headers["Accept"] = "application/vnd.github.raw"
+    return headers
 
 def atomic_write(target_path: str, data: bytes):
     Path(os.path.dirname(target_path)).mkdir(parents=True, exist_ok=True)
@@ -64,24 +73,13 @@ def save_sync_meta(meta: dict):
     with open(SYNC_META, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-def build_headers(url: str):
-    headers = {}
-    if SYNC_TOKEN:
-        headers["Authorization"] = f"Bearer {SYNC_TOKEN}"
-    if "api.github.com" in url:
-        headers["Accept"] = "application/vnd.github.raw"
-    return headers
-
 def fetch_to(path: str, url: str):
-    if not url:
-        return
+    if not url: return
     meta = load_sync_meta()
     m = meta.get(url, {})
     headers = build_headers(url)
-    if "etag" in m:
-        headers["If-None-Match"] = m["etag"]
-    if "last_modified" in m:
-        headers["If-Modified-Since"] = m["last_modified"]
+    if "etag" in m:           headers["If-None-Match"]     = m["etag"]
+    if "last_modified" in m:  headers["If-Modified-Since"] = m["last_modified"]
     try:
         r = requests.get(url, headers=headers, timeout=15)
         if r.status_code == 304:
@@ -96,32 +94,46 @@ def fetch_to(path: str, url: str):
         save_sync_meta(meta)
         print(f"[SYNC] {os.path.basename(path)} <- {url} ({len(r.content)} bytes)")
     except Exception as e:
-        print(f"[SYNC WARN] failed to fetch {url}: {e}  (keeping previous file)")
+        print(f"[SYNC WARN] failed to fetch {url}: {e} (keeping previous file)")
 
-# =================== حالة التنفيذ ===================
+# =========================
+# أدوات عامة
+# =========================
+PROCESSED_MEM = set()  # كاش داخل العملية
+
+def debug(msg: str): print(f"[DEBUG] {msg}")
+
+def to_iso(dt: datetime) -> str:
+    return dt.isoformat(timespec="seconds")
+
+def parse_iso(s: str):
+    if not s: return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", ""))
+    except Exception:
+        return None
+
 def load_state():
     path = STATE_JSON
     if not os.path.exists(path):
         debug(f"state file not found, using fresh: {path}")
-        return {"last_ts": "", "last_row": 0, "processed": []}
+        return {"last_ts": "", "last_row": 0, "processed_channels": []}
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     data.setdefault("last_ts", "")
     data.setdefault("last_row", 0)
-    data.setdefault("processed", [])
-    debug(f"state loaded from {path} | processed={len(data['processed'])} last_ts={data['last_ts']} last_row={data['last_row']}")
+    data.setdefault("processed_channels", [])
+    debug(f"state loaded from {path} | processed={len(data['processed_channels'])} last_ts={data['last_ts']} last_row={data['last_row']}")
     return data
 
 def save_state(state):
     path = STATE_JSON
     d = os.path.dirname(path)
-    if d:
-        os.makedirs(d, exist_ok=True)
+    if d: os.makedirs(d, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
-    debug(f"state saved to {path} | processed={len(state.get('processed', []))} last_ts={state.get('last_ts','')} last_row={state.get('last_row',0)}")
+    debug(f"state saved to {path} | processed={len(state.get('processed_channels', []))} last_ts={state.get('last_ts','')} last_row={state.get('last_row',0)}")
 
-# =================== CSV helpers ===================
 def load_csv(path, required_cols):
     if not os.path.exists(path):
         debug(f"csv not found, creating empty: {path}")
@@ -133,277 +145,310 @@ def load_csv(path, required_cols):
     return df
 
 def normalize_phone(p):
-    if pd.isna(p):
-        return ""
+    if pd.isna(p): return ""
     s = str(p).strip().replace(" ", "")
     if s.startswith("whatsapp:"):
         s = s[len("whatsapp:"):]
     return s
 
-# =================== مفاتيح القالب (تعالج 21656) ===================
-def build_template_vars(patient: str, department: str, event: str) -> dict:
-    """
-    يقرأ المفاتيح من TWILIO_TEMPLATE_KEYS (افتراضي: 1,2,3)
-    ويربطها بالقيم بالترتيب: patient, department, event
-    لو أردت قالبًا بلا متغيرات: اجعل المتغير البيئي فارغًا.
-    """
-    keys_env = os.getenv("TWILIO_TEMPLATE_KEYS", "1,2,3").strip()
-    if not keys_env:
-        return {}
-    keys = [k.strip() for k in keys_env.split(",") if k.strip()]
-    values = [patient, department, event]
-    vars_dict = {}
-    for i, k in enumerate(keys):
-        if i < len(values):
-            vars_dict[k] = values[i]
-    debug(f"template_vars keys={keys} vars={vars_dict}")
-    return vars_dict
+def make_key(row_id: str, patient: str, department: str, event: str, ts_str: str) -> str:
+    return f"id:{row_id}" if row_id else f"{patient}|{department}|{event}|{ts_str}"
 
-# =================== انتظار حالة التسليم ===================
-def wait_final_status(client, sid: str, timeout: int = DELIVERY_TIMEOUT):
-    """
-    يستعلم حالة الرسالة حتى تصل لحالة نهائية أو ينتهي الوقت.
-    يرجع (status, error_code, error_message).
-    حالات النهاية: delivered / sent / failed / undelivered
-    """
+def make_channel_key(base_key: str, channel: str, recipient: str) -> str:
+    # recipient = email أو telegram_chat_id
+    return f"{base_key}|ch:{channel}|to:{recipient or '-'}"
+
+def append_audit(ts_iso, event_id, department, recipient, channel, status, msg_id=""):
     try:
-        deadline = time.time() + timeout
-        last = ("queued", None, None)
-        while time.time() < deadline:
-            m = client.messages(sid).fetch()
-            last = (m.status, getattr(m, "error_code", None), getattr(m, "error_message", None))
-            if m.status in ("delivered", "sent", "failed", "undelivered"):
-                return last
-            time.sleep(1)
-        return last
+        import csv
+        hdr = ["time_iso","event_id","department","recipient","channel","status","msg_id"]
+        file_exists = os.path.exists(AUDIT_CSV)
+        with open(AUDIT_CSV, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if not file_exists: w.writerow(hdr)
+            w.writerow([ts_iso, event_id, department, recipient, channel, status, msg_id])
     except Exception as e:
-        print("[WAIT STATUS ERROR]", e)
-        return (None, None, None)
+        print("[AUDIT WARN]", e)
 
-# =================== الإرسال: واتساب / SMS / تيليجرام ===================
-def send_whatsapp(to_number: str, text: str, vars_dict: dict = None) -> bool:
-    """
-    يحاول القالب أولاً (Content API)،
-    ثم يتحقق من حالة التسليم؛ نجاح فقط إذا delivered (إلا إذا عطّلت WA_REQUIRE_DELIVERED).
-    وإلا يسقط إلى free-form داخل نافذة 24 ساعة.
-    """
-    sid = TWILIO_ACCOUNT_SID
-    tok = TWILIO_AUTH_TOKEN
-    svc = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "").strip()
-    from_num = TWILIO_WHATSAPP_FROM
-    content_sid = os.getenv("TWILIO_CONTENT_SID", "").strip()
+# =========================
+# القوالب — templates.json
+# =========================
+DEFAULT_TEMPLATES = {
+    "default": {
+        "vars": ["patient", "department", "event"],
+        "telegram": {
+            "text": "📣 تحديث جديد\nالمريض: {patient}\nالقسم: {department}\nالحالة: {event}"
+        },
+        "email": {
+            "subject": "تنبيه: [{department}] {event}",
+            "plain": "📣 تحديث جديد\nالمريض: {patient}\nالقسم: {department}\nالحالة: {event}\n\n(رسالة آلية – لا ترد)",
+            "html": "<p>📣 تحديث جديد</p><p>المريض: <b>{patient}</b><br/>القسم: <b>{department}</b><br/>الحالة: <b>{event}</b></p><p style='color:#888;font-size:12px'>رسالة آلية – لا ترد</p>"
+        }
+    }
+}
 
-    if not (sid and tok and (svc or from_num)):
-        print(f"[SIMULATE WA] to={to_number} :: {text}")
-        return True
-
-    from twilio.rest import Client
-    client = Client(sid, tok)
-    base_kwargs = {"to": f"whatsapp:{to_number.replace('whatsapp:','')}"}
-    if svc:
-        base_kwargs["messaging_service_sid"] = svc
-    else:
-        base_kwargs["from_"] = from_num
-
-    def ok(status: str) -> bool:
-        return (status == "delivered") or (not WA_REQUIRE_DELIVERED and status in ("sent", "delivered"))
-
-    # 1) جرّب القالب إن متاح
-    if content_sid:
+def load_templates():
+    if os.path.exists(TEMPLATES_PATH):
         try:
-            kwargs = dict(base_kwargs, content_sid=content_sid)
-            if vars_dict:
-                kwargs["content_variables"] = json.dumps(vars_dict, ensure_ascii=False)
-            msg = client.messages.create(**kwargs)
-            status, err_code, err_msg = wait_final_status(client, msg.sid)
-            if ok(status):
-                print("[SENT]", msg.sid, "to", to_number, "via template", status)
-                return True
-            print("[WA DELIVERY NOT CONFIRMED - template]", status, err_code, err_msg)
-            return False  # فعّل SMS
-        except TwilioRestException as e:
-            print("[TWILIO TEMPLATE ERROR]", e.status, getattr(e, "code", None), getattr(e, "msg", str(e)))
-            return False
+            with open(TEMPLATES_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and data:
+                    return data
         except Exception as e:
-            print("[WA TEMPLATE ERROR]", e)
-            return False
+            print(f"[TEMPLATE WARN] failed to read templates.json: {e}")
+    return DEFAULT_TEMPLATES
 
-    # 2) سقوط إلى free-form (نافذة 24 ساعة)
-    try:
-        msg = client.messages.create(**base_kwargs, body=text)
-        status, err_code, err_msg = wait_final_status(client, msg.sid)
-        if ok(status):
-            print("[SENT]", msg.sid, "to", to_number, "via free-form", status)
-            return True
-        print("[WA DELIVERY NOT CONFIRMED - free]", status, err_code, err_msg)
-        return False
-    except TwilioRestException as e2:
-        print("[TWILIO FREE-FORM ERROR]", e2.status, getattr(e2, "code", None), getattr(e2, "msg", str(e2)))
-        return False
-    except Exception as e:
-        print("[WA ERROR]", e)
-        return False
+def render_template(tmpl_block: dict, values: dict):
+    def fill(s: str):
+        try:
+            return s.format(**values) if s else ""
+        except KeyError as ke:
+            # لو متغير ناقص، نترك placeholder كما هو لسهولة اكتشافه
+            return s
+    tel_text = fill(tmpl_block.get("telegram", {}).get("text", ""))
+    em = tmpl_block.get("email", {})
+    subj  = fill(em.get("subject", ""))
+    plain = fill(em.get("plain", subj))
+    html  = fill(em.get("html", ""))
+    return tel_text, subj, plain, html
 
-def send_sms(to_number: str, text: str) -> bool:
-    if not os.getenv("ENABLE_SMS"):
-        return False
-    sid = TWILIO_ACCOUNT_SID
-    tok = TWILIO_AUTH_TOKEN
-    svc = os.getenv("TWILIO_MESSAGING_SERVICE_SID", "").strip()
-    sms_from = os.getenv("TWILIO_SMS_FROM", "").strip()
-    if not (sid and tok and (svc or sms_from)):
-        return False
-    try:
-        from twilio.rest import Client
-        client = Client(sid, tok)
-        kwargs = {"to": to_number}
-        if svc:
-            kwargs["messaging_service_sid"] = svc
-        else:
-            kwargs["from_"] = sms_from
-        msg = client.messages.create(**kwargs, body=text)
-        print("[SENT]", msg.sid, "to", to_number, "via SMS")
-        return True
-    except Exception as e:
-        print("[SMS ERROR]", e)
-        return False
+# =========================
+# Telegram
+# =========================
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
 def send_telegram(chat_id: str, text: str) -> bool:
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-    if not (token and chat_id):
+    if not chat_id:
+        print("[SKIP TG] empty chat_id")
         return False
+    if DRY_RUN:
+        print(f"[DRYRUN TG] chat_id={chat_id} :: {text}")
+        return True
+    token = TELEGRAM_BOT_TOKEN
+    if not token:
+        print(f"[SIMULATE TG] chat_id={chat_id} :: {text}")
+        return True
     try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        r = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
-        if r.ok:
-            print("[SENT]", chat_id, "via Telegram")
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=12
+        )
+        if r.status_code == 200:
+            print("[SENT TG] chat_id", chat_id)
             return True
-        print("[TELEGRAM ERROR]", r.status_code, r.text)
+        print("[ERROR TG]", r.status_code, r.text)
         return False
     except Exception as e:
-        print("[TELEGRAM ERROR]", e)
+        print("[ERROR TG]", e)
         return False
 
-# =================== المعالجة الأساسية ===================
+# =========================
+# Email (SMTP)
+# =========================
+SMTP_HOST   = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT   = int(os.getenv("SMTP_PORT", "587") or 587)
+SMTP_USER   = os.getenv("SMTP_USER", "").strip()
+SMTP_PASS   = os.getenv("SMTP_PASS", "").strip()
+SMTP_FROM   = os.getenv("SMTP_FROM", "noreply@hospital.example").strip()
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "1").strip() == "1"   # STARTTLS
+SMTP_USE_SSL = os.getenv("SMTP_USE_SSL", "0").strip() == "1"   # SMTPS 465
+
+def send_email(to_email: str, subject: str, plain: str, html: str) -> bool:
+    if not to_email:
+        print("[SKIP EMAIL] empty recipient")
+        return False
+    if DRY_RUN:
+        print(f"[DRYRUN EMAIL] to={to_email} :: subj={subject} :: plain={plain}")
+        return True
+    if not SMTP_HOST:
+        print(f"[SIMULATE EMAIL] to={to_email} :: subj={subject}")
+        return True
+
+    msg = EmailMessage()
+    msg["From"] = SMTP_FROM
+    msg["To"]   = to_email
+    msg["Subject"] = subject or "(no subject)"
+    msg.set_content(plain or subject or "")
+    if html:
+        msg.add_alternative(html, subtype="html")
+
+    try:
+        if SMTP_USE_SSL:
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=context, timeout=15) as server:
+                if SMTP_USER and SMTP_PASS:
+                    server.login(SMTP_USER, SMTP_PASS)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
+                if SMTP_USE_TLS:
+                    server.starttls(context=ssl.create_default_context())
+                if SMTP_USER and SMTP_PASS:
+                    server.login(SMTP_USER, SMTP_PASS)
+                server.send_message(msg)
+        print("[SENT EMAIL]", to_email)
+        return True
+    except Exception as e:
+        print("[ERROR EMAIL]", e)
+        return False
+
+# =========================
+# حلقة التشغيل
+# =========================
 def run_once():
-    # جرّب سحب آخر نسخ إلى /data
+    # 1) مزامنة (اختياري)
     fetch_to(UPDATES_CSV, SYNC_UPDATES_URL)
     fetch_to(ONCALL_CSV,  SYNC_ONCALL_URL)
     fetch_to(STAFF_CSV,   SYNC_STAFF_URL)
 
-    # تحميل CSVs
-    staff   = load_csv(STAFF_CSV,  ["name","department","phone","role","authorized"])
-    oncall  = load_csv(ONCALL_CSV, ["department","phone","telegram_chat_id"])
-    updates = load_csv(UPDATES_CSV,["id","patient_name","department","event","timestamp"])
+    # 2) تحميل البيانات
+    staff   = load_csv(STAFF_CSV,  ["name","department","phone","role","authorized","telegram_chat_id","email","email_enabled"])
+    oncall  = load_csv(ONCALL_CSV, ["department","phone"])
+    updates = load_csv(UPDATES_CSV,["id","patient_name","department","event","timestamp","template"])
 
     staff["phone"] = staff["phone"].map(normalize_phone)
-    staff["authorized"] = staff["authorized"].fillna(0).astype(int)
-    oncall["phone"] = oncall["phone"].map(normalize_phone)
+    # authorized
+    staff["authorized"] = staff["authorized"].fillna(0).astype(str).map(lambda v: str(v).strip() in ("1","True","true","yes","Y"))
+    # email_enabled
+    def as_bool(x, default=True):
+        sx = str(x).strip().lower()
+        if sx in ("1","true","yes","y"): return True
+        if sx in ("0","false","no","n"): return False
+        return default
+    staff["email_enabled"] = staff["email_enabled"].map(lambda v: as_bool(v, True))
+    staff["telegram_chat_id"] = staff["telegram_chat_id"].fillna("").astype(str)
+    staff["email"] = staff["email"].fillna("").astype(str).str.strip()
 
-    # department -> authorized numbers / telegram
-    auth_numbers = set(staff.loc[staff["authorized"] == 1, "phone"].dropna().astype(str))
-    dep_to_oncall, dep_to_tg = {}, {}
+    # خرائط سريعة حسب الهاتف
+    staff_by_phone = {}
+    for _, r in staff.iterrows():
+        ph = str(r.get("phone","")).strip()
+        if not ph: continue
+        staff_by_phone[ph] = {
+            "name": str(r.get("name","")).strip(),
+            "department": str(r.get("department","")).strip(),
+            "authorized": bool(r.get("authorized", False)),
+            "telegram_chat_id": str(r.get("telegram_chat_id","")).strip(),
+            "email": str(r.get("email","")).strip(),
+            "email_enabled": bool(r.get("email_enabled", True)),
+        }
+
+    # department -> set(phones) من oncall مع فلترة التفويض
+    dep_to_oncall = {}
     for _, row in oncall.iterrows():
-        dep = str(row.get("department", "")).strip()
-        ph  = str(row.get("phone", "")).strip()
-        tg  = str(row.get("telegram_chat_id", "")).strip()
-        if dep and ph and ph in auth_numbers:
-            dep_to_oncall.setdefault(dep, set()).add(ph)
-        if dep and tg:
-            dep_to_tg.setdefault(dep, set()).add(tg)
+        dep = str(row.get("department","")).strip()
+        ph  = normalize_phone(row.get("phone",""))
+        if not dep or not ph: continue
+        info = staff_by_phone.get(ph)
+        if not info or not info["authorized"]:
+            continue
+        dep_to_oncall.setdefault(dep, set()).add(ph)
 
-    # الحالة
+    # 3) الحالة
     state = load_state()
-    processed = set(state.get("processed", []))
-    last_ts = state.get("last_ts", "")
+    processed = set(state.get("processed_channels", []))
+    last_ts  = state.get("last_ts", "")
     last_row = int(state.get("last_row", 0))
-    last_dt = parse_iso(last_ts) if last_ts else None
+    last_dt  = parse_iso(last_ts) if last_ts else None
 
     global PROCESSED_MEM
     if PROCESSED_MEM:
         processed |= PROCESSED_MEM
     PROCESSED_MEM = set(processed)
 
-    # تحديد الصفوف الجديدة
+    # 4) اختيار الصفوف الجديدة
     to_process = []
     for idx, row in updates.iterrows():
-        row_id = str(row.get("id", "")).strip()
-        ts_str = str(row.get("timestamp", "")).strip()
-        key = f"id:{row_id}" if row_id else f"{str(row.get('patient_name','')).strip()}|{str(row.get('department','')).strip()}|{str(row.get('event','')).strip()}|{ts_str}"
-        if key in processed:
-            continue
-        ts_dt = parse_iso(ts_str)
+        ts_str  = str(row.get("timestamp","")).strip()
+        ts_dt   = parse_iso(ts_str)
         try:
             is_new = (last_dt is None) or (ts_dt and last_dt and ts_dt > last_dt) or (idx > last_row)
         except Exception:
             is_new = idx > last_row
         if is_new:
-            to_process.append((idx, row, key, ts_dt))
+            to_process.append((idx, row, ts_dt, ts_str))
 
-    # الإرسال
+    # حمّل القوالب مرة واحدة
+    templates = load_templates()
+
+    # 5) إرسال (fan-out) Telegram + Email
     sent_count = 0
     max_dt_seen = last_dt
 
-    for idx, row, key, ts_dt in to_process:
+    for idx, row, ts_dt, ts_str in to_process:
         patient    = str(row.get("patient_name", "")).strip()
         department = str(row.get("department", "")).strip()
         event      = str(row.get("event", "")).strip()
+        row_id     = str(row.get("id","")).strip()
+        template_name = (str(row.get("template","")).strip() or "default")
 
         if not department:
             print(f"[SKIP idx={idx}] missing department")
-            processed.add(key); PROCESSED_MEM.add(key)
             continue
 
-        phones = dep_to_oncall.get(department, set())
-        tgs    = dep_to_tg.get(department, set())
-        if not phones and not tgs:
-            print(f"[NO TARGET] department={department} has no on-call channel")
-            processed.add(key); PROCESSED_MEM.add(key)
+        targets = dep_to_oncall.get(department, set())
+        if not targets:
+            print(f"[NO ONCALL] department={department} has no authorized on-call")
             continue
 
-        text = f"تحديث تشغيلي\nالمريض: {patient}\nالقسم: {department}\nالحالة: {event}"
-        vars_dict = build_template_vars(patient, department, event)
+        # إعداد القيم للقوالب
+        values = {
+            "patient":    patient,
+            "department": department,
+            "event":      event,
+            "timestamp":  ts_str,
+            "id":         row_id or "",
+        }
+        # تمرير أي أعمدة إضافية موجودة
+        for col in updates.columns:
+            if col in ("patient_name","department","event","timestamp","id","template"):
+                continue
+            values[col] = str(row.get(col,"") if not pd.isna(row.get(col,"")) else "").strip()
 
-        delivered = False
+        tmpl = templates.get(template_name, templates.get("default", DEFAULT_TEMPLATES["default"]))
+        tel_text, subj, plain, html = render_template(tmpl, values)
+        base_key = make_key(row_id, patient, department, event, ts_str)
 
-        # WhatsApp أولاً
-        for ph in phones:
-            if send_whatsapp(ph, text, vars_dict):
-                delivered = True
-                break
-
-        # SMS كبديل
-        if not delivered:
-            for ph in phones:
-                if send_sms(ph, text):
-                    delivered = True
-                    break
-
-        # Telegram كبديل أخير (اختياري)
-        if not delivered and tgs:
-            for chat_id in tgs:
-                if send_telegram(chat_id, text):
-                    delivered = True
-                    break
-
-        if delivered:
-            sent_count += 1
-
-        processed.add(key)
-        PROCESSED_MEM.add(key)
+        any_ok = False
+        for ph in targets:
+            info = staff_by_phone.get(ph, {})
+            # Telegram
+            if "telegram" in CHANNELS:
+                tg_id = info.get("telegram_chat_id", "")
+                ch_key = make_channel_key(base_key, "telegram", tg_id)
+                if tg_id and (ch_key not in processed):
+                    ok = send_telegram(tg_id, tel_text or f"📣 {event} — {department} — {patient}")
+                    if ok:
+                        sent_count += 1; any_ok = True
+                        processed.add(ch_key); PROCESSED_MEM.add(ch_key)
+                        append_audit(to_iso(datetime.now()), row_id or base_key, department, f"tg:{tg_id}", "telegram", "sent")
+                    else:
+                        append_audit(to_iso(datetime.now()), row_id or base_key, department, f"tg:{tg_id}", "telegram", "error")
+            # Email
+            if "email" in CHANNELS:
+                to_email = info.get("email", "")
+                ch_key = make_channel_key(base_key, "email", to_email)
+                if to_email and info.get("email_enabled", True) and (ch_key not in processed):
+                    ok = send_email(to_email, subj or f"[{department}] {event}", plain, html)
+                    if ok:
+                        sent_count += 1; any_ok = True
+                        processed.add(ch_key); PROCESSED_MEM.add(ch_key)
+                        append_audit(to_iso(datetime.now()), row_id or base_key, department, to_email, "email", "sent")
+                    else:
+                        append_audit(to_iso(datetime.now()), row_id or base_key, department, to_email, "email", "error")
 
         if ts_dt and (max_dt_seen is None or ts_dt > max_dt_seen):
             max_dt_seen = ts_dt
-
         state["last_row"] = max(state.get("last_row", 0), idx)
 
+    # 6) حفظ الحالة
     if max_dt_seen:
         state["last_ts"] = to_iso(max_dt_seen)
-
-    if len(processed) > 10000:
-        processed = set(list(processed)[-10000:])
-
-    state["processed"] = list(processed)
+    # قصّ القائمة لتجنّب التضخّم
+    if len(processed) > 50000:
+        processed = set(list(processed)[-50000:])
+    state["processed_channels"] = list(processed)
     save_state(state)
 
     debug(f"processed_mem_size={len(PROCESSED_MEM)}")
@@ -417,12 +462,12 @@ def main():
     args = ap.parse_args()
 
     if getattr(args, "run_once", False):
-        run_once(); return
+        run_once()
+        return
 
     while True:
         run_once()
-        if args.interval <= 0:
-            break
+        if args.interval <= 0: break
         time.sleep(args.interval)
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 import os
 from dotenv import load_dotenv
+import json
+TELEGRAM_CHAT_IDS = json.loads(os.getenv("TELEGRAM_CHAT_IDS", "{}"))
 
 load_dotenv()
 

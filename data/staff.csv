@@ -1,4 +1,3 @@
-name,department,phone,role,authorized
-زايد,الباطنة,+966556699615,طبيب مناوب,1
-سارة,الباطنة,+966556699615,ممرضة,0
-ليلى,الطوارئ,+966556699615,طبيب مناوب,0
+name,department,phone,role,authorized,telegram_chat_id,email,email_enabled
+Zayed,الباطنة,+966556699615,Supervisor,1,123456789,zayed@example.com,1
+Hala,الطوارئ,+9665XXXXXXX,Nurse,1,987654321,hala@example.com,1

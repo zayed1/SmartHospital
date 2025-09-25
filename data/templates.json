@@ -1,37 +1,37 @@
 {
   "default": {
     "telegram": {
-      "text": "📣 تحديث\nالقسم: {department}\nالنوع: {event_type}\nالأولوية: {priority}\nالموقع: {location}\nالمعرف: {mrn}\nالأحرف: {patient_initials}\n🕒 {timestamp}\nملاحظات: {notes}\n🔗 {link_to_chart}"
+      "text": "📣 تحديث جديد\nالقسم: {department}\nالحالة: {event_type}\nالمريض: {patient_initials}\n🕒 {timestamp}\nملاحظات: {notes}\n🔗 {link_to_chart}"
     }
   },
   "emergency": {
     "telegram": {
-      "text": "🚨🚑 نداء عاجل ({responsible_team})\nالقسم: {department} | أولوية: {priority}\nالموقع: {location}\nالمعرف: {mrn}\nالأحرف: {patient_initials}\n🕒 {timestamp}\nملاحظات: {notes}\n☎︎ تحويلة: {contact_ext}\n🔗 {link_to_chart}"
+      "text": "🚨🚑 طارئ جديد!\nالقسم: {department} | أولوية: {priority}\nالموقع: {location}\nالمعرف: {mrn}\nالمريض: {patient_initials}\n🕒 {timestamp}\nملاحظات: {notes}\n☎︎ تحويلة: {contact_ext}\n🔗 {link_to_chart}"
     }
   },
   "lab_result": {
     "telegram": {
-      "text": "🧪 نتائج المختبر ({lab_panel})\nالقسم: {department} | أولوية: {priority}\nالمعرف: {mrn}\nالأحرف: {patient_initials}\nالقيم: {lab_values}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+      "text": "🧪 نتيجة مختبر ({lab_panel})\nالقسم: {department} | أولوية: {priority}\nالمعرف: {mrn}\nالمريض: {patient_initials}\nالقيم: {lab_values}\n🕒 {timestamp}\n🔗 {link_to_chart}"
     }
   },
   "med_change": {
     "telegram": {
-      "text": "💊 تعديل دوائي\nالقسم: {department}\nدواء: {med_name}\nالتعديل: {dose_change}\nالسبب: {reason}\nالمعرف: {mrn}\nالأحرف: {patient_initials}\nإجراء مطلوب: {action_required}\nقبل: {due_by}\n🔗 {link_to_chart}"
+      "text": "💊 تعديل دوائي\nالقسم: {department}\nدواء: {med_name}\nالتعديل: {dose_change}\nالسبب: {reason}\nالمعرف: {mrn}\nالمريض: {patient_initials}\nإجراء مطلوب: {action_required}\nقبل: {due_by}\n🔗 {link_to_chart}"
     }
   },
   "admission": {
     "telegram": {
-      "text": "🏥 دخول تنويم\nالقسم: {department}\nالموقع: {location}\nالمعرف: {mrn}\nالأحرف: {patient_initials}\nالسبب: {admission_reason}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+      "text": "🏥 دخول تنويم\nالقسم: {department}\nالموقع: {location}\nالمعرف: {mrn}\nالمريض: {patient_initials}\nالسبب: {admission_reason}\n🕒 {timestamp}\n🔗 {link_to_chart}"
     }
   },
   "discharge": {
     "telegram": {
-      "text": "🏠 خروج مريض\nالقسم: {department}\nالمعرف: {mrn}\nالأحرف: {patient_initials}\nالخطة: {discharge_plan}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+      "text": "🏠 خروج مريض\nالقسم: {department}\nالمعرف: {mrn}\nالمريض: {patient_initials}\nالخطة: {discharge_plan}\n🕒 {timestamp}\n🔗 {link_to_chart}"
     }
   },
   "transfer": {
     "telegram": {
-      "text": "🔁 تحويل مريض\nمن: {department} → إلى: {transfer_to}\nالمعرف: {mrn}\nالأحرف: {patient_initials}\nالموقع الحالي: {location}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+      "text": "🔁 تحويل مريض\nمن: {department} → إلى: {transfer_to}\nالمعرف: {mrn}\nالمريض: {patient_initials}\nالموقع الحالي: {location}\n🕒 {timestamp}\n🔗 {link_to_chart}"
     }
   }
 }

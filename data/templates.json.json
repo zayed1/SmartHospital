@@ -1,7 +1,0 @@
-{
-  "default": {
-    "telegram": {
-      "text": "📣 تحديث جديد\nالمريض: {patient}\nالقسم: {department}\nالحالة: {event}\n📅 {timestamp}"
-    }
-  }
-}

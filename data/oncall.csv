@@ -1,3 +1,4 @@
-department,telegram_chat_id
-الباطنة,-1003194837177
-الطوارئ,-1002756380484
+department,staff_id,authorized,telegram_chat_id
+الطوارئ,S100,yes,
+الباطنة,S200,yes,
+الأطفال,,no,

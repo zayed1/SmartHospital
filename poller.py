@@ -2,8 +2,10 @@ from __future__ import annotations
 import os, csv, json, time, requests
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import urlparse, urlencode, parse_qsl, urlunparse
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS, STATE_JSON, INTERVAL, SYNC_UPDATES_URL, SYNC_ONCALL_URL, SYNC_STAFF_URL, DATA_DIR
 
+SYNC_CACHE_BUST = os.getenv("SYNC_CACHE_BUST","0")=="1"
 U = os.path.join
 UPDATES_CSV = U(DATA_DIR, "updates.csv")
 ONCALL_CSV = U(DATA_DIR, "oncall.csv")
@@ -11,6 +13,8 @@ STAFF_CSV = U(DATA_DIR, "staff.csv")
 
 def fetch(url, path):
     if not url: return
+    if SYNC_CACHE_BUST:
+        p=list(urlparse(url)); q=dict(parse_qsl(p[4])); q["_t"]=str(int(time.time())); p[4]=urlencode(q); url=urlunparse(p)
     r = requests.get(url, timeout=15)
     r.raise_for_status()
     Path(os.path.dirname(path) or ".").mkdir(parents=True, exist_ok=True)
@@ -20,7 +24,7 @@ def fetch(url, path):
 def read_csv(path):
     if not os.path.exists(path): return []
     with open(path, newline="", encoding="utf-8") as f:
-        return [ { (k or "").strip(): (v.strip() if isinstance(v,str) else v) for k,v in row.items() } for row in csv.DictReader(f) ]
+        return [{(k or "").strip(): (v.strip() if isinstance(v,str) else v) for k,v in row.items()} for row in csv.DictReader(f)]
 
 def load_state():
     if not os.path.exists(STATE_JSON): return {"processed": []}
@@ -34,8 +38,7 @@ def save_state(s):
 def k(row):
     i = (row.get("id") or "").strip()
     if i: return f"id:{i}"
-    a = (row.get("department",""), row.get("event_type",""), row.get("timestamp",""))
-    return "|".join(a)
+    return "|".join([(row.get("department","")), (row.get("event_type","")), (row.get("timestamp",""))])
 
 def chat_for(dept):
     return str(TELEGRAM_CHAT_IDS.get(dept,"")).strip()
@@ -55,10 +58,8 @@ def send(chat_id, text):
     if not TELEGRAM_BOT_TOKEN: return False
     r = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": chat_id, "text": text}, timeout=15)
     if r.status_code == 200:
-        print("[SENT TG]", chat_id)
-        return True
-    print("[ERR TG]", r.status_code, r.text)
-    return False
+        print("[SENT TG]", chat_id); return True
+    print("[ERR TG]", r.status_code, r.text); return False
 
 def run_once():
     if SYNC_UPDATES_URL: fetch(SYNC_UPDATES_URL, UPDATES_CSV)
@@ -74,11 +75,9 @@ def run_once():
         dept = (row.get("department") or "").strip()
         chat_id = chat_for(dept)
         if not chat_id:
-            print(f"[NO TARGET] {dept}")
-            continue
+            print(f"[NO TARGET] {dept}"); continue
         if send(chat_id, render(row)):
-            seen.add(key)
-            sent += 1
+            seen.add(key); sent += 1
     state["processed"] = list(seen)[-50000:]
     save_state(state)
     print(f"[DONE] sent={sent} at {datetime.now().isoformat(timespec='seconds')}")

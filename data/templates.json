@@ -1,7 +1,14 @@
 {
   "default": {
+    "vars": ["patient_name", "department", "event", "timestamp"],
     "telegram": {
-      "text": "📣 تحديث جديد\nالمريض: {patient}\nالقسم: {department}\nالحالة: {event}\n📅 {timestamp}"
+      "text": "📣 تحديث جديد\nالمريض: {patient_name}\nالقسم: {department}\nالحالة: {event}\n🕒 {timestamp}"
+    }
+  },
+  "emergency": {
+    "vars": ["patient_name", "department", "event", "timestamp"],
+    "telegram": {
+      "text": "🚨🚑 طارئ جديد!\nالقسم: {department}\nالحالة: {event}\nالمريض: {patient_name}\n🕒 {timestamp}"
     }
   }
 }

@@ -1,3 +1,5 @@
-name,department,phone,role,authorized,telegram_chat_id,email,email_enabled
-Zayed,الباطنة,+966556699615,Supervisor,1,4874148,zayed1@gmail.com,1
-Hala,الطوارئ,+966500000000,Nurse,1,987654321,hala@example.com,1
+staff_id,name,mobile
+stf01,د. أحمد الطواري,0551234567
+stf02,د. منى الباطنية,0552345678
+stf03,د. سارة النساء,0553456789
+stf04,د. خالد الأطفال,0554567890

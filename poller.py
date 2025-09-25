@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
 from urllib.parse import urlparse, urlencode, parse_qsl, urlunparse
-
 import requests
 
 # -----------------------
@@ -26,12 +25,12 @@ from config import (
 # Optional: force refresh of CSVs to avoid CDN cache (set SYNC_CACHE_BUST=1)
 SYNC_CACHE_BUST = os.getenv("SYNC_CACHE_BUST", "0") == "1"
 
-UPDATES_CSV   = os.path.join(DATA_DIR, "updates.csv")
-ONCALL_CSV    = os.path.join(DATA_DIR, "oncall.csv")
-STAFF_CSV     = os.path.join(DATA_DIR, "staff.csv")
-TEMPLATES_PATH= os.path.join(DATA_DIR, "templates.json")
-AUDIT_CSV     = os.path.join(DATA_DIR, "audit.csv")
-SYNC_META     = os.path.join(DATA_DIR, ".sync_meta.json")
+UPDATES_CSV    = os.path.join(DATA_DIR, "updates.csv")
+ONCALL_CSV     = os.path.join(DATA_DIR, "oncall.csv")
+STAFF_CSV      = os.path.join(DATA_DIR, "staff.csv")
+TEMPLATES_PATH = os.path.join(DATA_DIR, "templates.json")
+AUDIT_CSV      = os.path.join(DATA_DIR, "audit.csv")
+SYNC_META      = os.path.join(DATA_DIR, ".sync_meta.json")
 
 # -----------------------
 # Utils / logging
@@ -75,7 +74,6 @@ def _add_ts_param(u: str) -> str:
 
 def build_headers(url: str) -> Dict[str, str]:
     headers: Dict[str, str] = {}
-    # If fetching from GitHub API raw (not needed for raw.githubusercontent.com, but safe)
     if "api.github.com" in url:
         headers["Accept"] = "application/vnd.github.raw"
     return headers
@@ -85,9 +83,8 @@ def fetch_to(path: str, url: str) -> None:
         return
     url2 = _add_ts_param(url)
     meta = load_json(SYNC_META, {})
-    m = meta.get(url, {})  # meta keyed by original url w/o _t to keep stability
+    m = meta.get(url, {})  # keep meta keyed by original url
     headers = build_headers(url)
-    # Only use conditional headers when not forcing cache-bust
     if not SYNC_CACHE_BUST:
         if "etag" in m:          headers["If-None-Match"] = m["etag"]
         if "last_modified" in m: headers["If-Modified-Since"] = m["last_modified"]
@@ -98,9 +95,8 @@ def fetch_to(path: str, url: str) -> None:
             return
         r.raise_for_status()
         atomic_write(path, r.content)
-        # Save ETag/Last-Modified (from the response of the original URL)
         meta[url] = {
-            "etag": r.headers.get("ETag",   m.get("etag", "")),
+            "etag": r.headers.get("ETag", m.get("etag", "")),
             "last_modified": r.headers.get("Last-Modified", m.get("last_modified", "")),
         }
         save_json(SYNC_META, meta)
@@ -124,10 +120,37 @@ def load_csv_rows(path: str) -> List[Dict[str, str]]:
         return rows
 
 def load_state() -> Dict[str, Any]:
+    # Fresh state if missing
     if not os.path.exists(STATE_JSON):
         debug(f"state file not found, using fresh: {STATE_JSON}")
         return {"processed_keys": [], "last_ts": ""}
-    return load_json(STATE_JSON, {"processed_keys": [], "last_ts": ""})
+
+    state = load_json(STATE_JSON, {"processed_keys": [], "last_ts": ""})
+
+    # ---- MIGRATION from legacy formats ----
+    migrated = False
+
+    # v1: legacy 'processed' list -> 'processed_keys' with 'id:' prefix
+    if ("processed_keys" not in state) and ("processed" in state):
+        legacy = state.get("processed") or []
+        legacy = [str(x).strip() for x in legacy if str(x).strip()]
+        migrated_list = [(x if x.startswith("id:") else f"id:{x}") for x in legacy]
+        state["processed_keys"] = migrated_list
+        migrated = True
+
+    # remove legacy last_row if present
+    if "last_row" in state:
+        state.pop("last_row", None)
+        migrated = True
+
+    state.setdefault("processed_keys", [])
+    state.setdefault("last_ts", "")
+
+    if migrated:
+        save_json(STATE_JSON, state)
+        print(f"[MIGRATE] state migrated to new format at {STATE_JSON} | processed_keys={len(state['processed_keys'])}")
+
+    return state
 
 def save_state(state: Dict[str, Any]) -> None:
     save_json(STATE_JSON, state)
@@ -206,7 +229,6 @@ def render_template(tmpl_block: Dict[str, Any], values: Dict[str, Any]) -> str:
     try:
         return text.format(**values)
     except KeyError as e:
-        # If a placeholder is missing in CSV, leave it visible to debug
         print(f"[TEMPLATE WARN] missing key in values: {e}")
         return text
 
@@ -281,7 +303,6 @@ def make_event_key(row: Dict[str, str]) -> str:
     rid = str(row.get("id", "")).strip()
     if rid:
         return f"id:{rid}"
-    # fallback: compose a unique signature
     patient = str(row.get("patient_name", "")).strip()
     dept    = str(row.get("department", "")).strip()
     evtype  = str(row.get("event_type", "")).strip()
@@ -362,7 +383,7 @@ def main():
     ap.add_argument("--run-once", action="store_true", help="Process a single cycle and exit.")
     args = ap.parse_args()
 
-    if args.run_once or args.interval <= 0:
+    if args.run-once or args.interval <= 0:
         run_once()
         return
 

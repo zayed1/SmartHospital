@@ -3,3 +3,4 @@ S9001,الطوارئ,emergency,2025-09-26T00:05:00+03:00,MRN-10001,م.ح,https:/
 S9002,الباطنة,lab_result,2025-09-26T00:06:00+03:00,MRN-20002,س.ع,https://his.local/enc/20002
 S9003,الطوارئ,transfer,2025-09-26T00:07:00+03:00,MRN-30003,ر.س,https://his.local/enc/30003
 S9004,الطوارئ,transfer,2025-09-26T00:07:00+02:00,MRN-30003,ر.س,https://his.local/enc/30003
+S9005,الباطنة,lab_result,2025-09-26T00:06:00+02:00,MRN-20002,س.ع,https://his.local/enc/20002

@@ -4,3 +4,5 @@ U4002,الباطنة,lab_result,normal,no,,2025-09-25T23:22:00+03:00,MRN-55211,�
 U4003,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:24:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,,,Enalapril,Increase to 10mg PO BID,Uncontrolled BP,,,,https://his.local/enc/55211,med_change
 U4004,الطوارئ,transfer,high,no,,2025-09-25T23:26:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer
 U4005,الأطفال,discharge,low,no,,2025-09-25T23:28:00+03:00,MRN-77102,ر.م,,P2-08/B1,Pediatrics,,,تحسن سريري، متابعة بعد 5 أيام,,,,,,,Follow-up OPD in 5d,,https://his.local/enc/77102,discharge
+U4006,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:24:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,,,Enalapril,Increase to 10mg PO BID,Uncontrolled BP,,,,https://his.local/enc/55211,med_change
+U4007,الطوارئ,transfer,high,no,,2025-09-25T23:26:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer

@@ -1,5 +1,3 @@
-staff_id,name,mobile
-stf01,د. أحمد الطواري,0551234567
-stf02,د. منى الباطنية,0552345678
-stf03,د. سارة النساء,0553456789
-stf04,د. خالد الأطفال,0554567890
+staff_id,name,mobile,email,telegram_chat_id
+S100,د. أحمد علي,0555123456,ahmad@example.com,
+S200,د. سارة محمد,0555765432,sarah@example.com,

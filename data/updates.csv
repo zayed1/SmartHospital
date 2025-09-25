@@ -1,12 +1,1 @@
 ﻿id,department,event_type,priority,action_required,due_by,timestamp,mrn,patient_initials,patient_name,location,responsible_team,attending,contact_ext,notes,lab_panel,lab_values,med_name,dose_change,reason,admission_reason,discharge_plan,transfer_to,link_to_chart,template
-U4001,الطوارئ,emergency,high,yes,2025-09-26T00:10:00+03:00,2025-09-25T23:20:00+03:00,MRN-90011,م.ح,,ER-01/R2,Rapid Response,,1201,هبوط ضغط مفاجئ,,,,,,,,,https://his.local/enc/90011,emergency
-U4002,الباطنة,lab_result,normal,no,,2025-09-25T23:22:00+03:00,MRN-55211,س.ع,,A3-12/B2,Laboratory,,1203,,BMP,Na 132↓; K 4.5; Cr 1.2,,,,,,,https://his.local/enc/55211,lab_result
-U4003,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:24:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,,,Enalapril,Increase to 10mg PO BID,Uncontrolled BP,,,,https://his.local/enc/55211,med_change
-U4004,الطوارئ,transfer,high,no,,2025-09-25T23:26:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer
-U4006,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:24:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,,,Enalapril,Increase to 10mg PO BID,Uncontrolled BP,,,,https://his.local/enc/55211,med_change
-U4007,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:24:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,,,Enalapril,Increase to 10mg PO BID,Uncontrolled BP,,,,https://his.local/enc/55211,med_change
-U4008,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:24:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,,,Enalapril,Increase to 10mg PO BID,Uncontrolled BP,,,,https://his.local/enc/55211,med_change
-U4009,الطوارئ,transfer,high,no,,2025-09-25T23:26:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer
-U4010,الطوارئ,transfer,high,no,,2025-09-25T23:26:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer
-U4011,الطوارئ,transfer,high,no,,2025-09-25T23:26:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer
-U4012,الطوارئ,transfer,high,no,,2025-09-25T23:26:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer

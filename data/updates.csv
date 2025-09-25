@@ -1,8 +1,0 @@
-id,department,event_type,priority,action_required,due_by,timestamp,mrn,patient_initials,patient_name,location,responsible_team,attending,contact_ext,notes,lab_panel,lab_values,med_name,dose_change,reason,admission_reason,discharge_plan,transfer_to,link_to_chart,template
-U3001,الطوارئ,emergency,high,yes,2025-09-25T23:10:00+03:00,2025-09-25T22:55:00+03:00,MRN-99001,م.ع,,ER-01/R2,Rapid Response,,1201,هبوط ضغط حاد,,,,,,,,,https://his.local/enc/99001,emergency
-U3002,الباطنة,lab_result,normal,no,,2025-09-25T23:00:00+03:00,MRN-55211,س.ع,,A3-12/B2,Laboratory,,1203,,BMP,"Na 130↓; K 4.8; Cr 1.3",,,,,,,https://his.local/enc/55211,lab_result
-U3003,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:05:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,Enalapril,"Increase to 10mg PO BID","Uncontrolled BP",,,,,https://his.local/enc/55211,med_change
-U3004,الطوارئ,transfer,high,no,,2025-09-25T23:07:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer
-U3005,الأطفال,discharge,low,no,,2025-09-25T23:09:00+03:00,MRN-77102,ر.م,,P2-08/B1,Pediatrics,,,تحسن سريري، متابعة بعد 5 أيام,,,,,,Follow-up OPD in 5d,,https://his.local/enc/77102,discharge
-U3006,الطوارئ,transfer,high,no,,2025-09-25T23:07:00+03:00,MRN-77321,ر.س,,ER-03/R1,Trauma Team,,1102,تحويل للعناية المركزة,,,,,,,ICU-01/Bed 3,https://his.local/enc/77321,transfer
-U3007,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T23:05:00+03:00,MRN-55211,س.ع,,A3-12/B2,Pharmacy,,1203,,Enalapril,"Increase to 10mg PO BID","Uncontrolled BP",,,,,https://his.local/enc/55211,med_change

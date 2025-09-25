@@ -1,3 +1,5 @@
-id,patient_name,department,event,timestamp,template
-U1001,محمد أحمد,الباطنة,نتيجة التحليل جاهزة,2025-09-25T21:10:00+03:00,default
-U1002,سارة علي,الطوارئ,هبوط حاد في الضغط,2025-09-25T21:12:00+03:00,emergency
+id,department,event_type,priority,action_required,due_by,timestamp,mrn,patient_initials,location,responsible_team,attending,contact_ext,notes,lab_panel,lab_values,med_name,dose_change,reason,admission_reason,discharge_plan,transfer_to,link_to_chart,template
+U2001,الطوارئ,emergency,high,yes,2025-09-25T22:45:00+03:00,2025-09-25T22:30:00+03:00,MRN-94823,م.أ,ER-05/R1,Rapid Response,,1234,انخفاض ضغط مفاجئ,,,,,,,,,https://his.local/enc/94823,emergency
+U2002,الباطنة,lab_result,normal,no,,2025-09-25T22:35:00+03:00,MRN-55211,س.ع,A3-12/B2,Laboratory,,1203,,CBC,"Hb 8.9↓; WBC 13.2↑; PLT 220",,,,,,,https://his.local/enc/55211,lab_result
+U2003,الباطنة,med_change,normal,yes,2025-09-26T08:00:00+03:00,2025-09-25T22:40:00+03:00,MRN-55211,س.ع,A3-12/B2,Pharmacy,,1203,,,"Enalapril","Start 5mg PO BID","HTN control",,,,,https://his.local/enc/55211,med_change
+U2004,الأطفال,discharge,low,no,,2025-09-25T22:50:00+03:00,MRN-77102,ر.م,P2-08/B1,Pediatrics,,2201,خطة خروج ومراجعة بعد أسبوع,,,,,,Follow-up OPD 7d,,https://his.local/enc/77102,discharge

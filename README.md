@@ -3,7 +3,7 @@
 هذا مشروع أولي (MVP) جاهز للتشغيل محليًا: يقرأ تحديثات من ملف CSV او google sheet ويُرسل تنبيهات Telegram للمناوب الحالي في كل قسم.
 
 > **المستوى:** بسيط جدًا – بدون تكامل مع HIS.  
-> **القناة:** WhatsApp عبر Twilio API (يمكن استبداله بـ Meta Cloud لاحقًا).
+> **القناة:** SMS,WhatsApp,Telegram,E-mail عبر Twilio API (يمكن استبداله بـ Meta Cloud لاحقًا).
 
 ---
 

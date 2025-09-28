@@ -1,0 +1,42 @@
+{
+  "MAR": {
+    "telegram": {
+      "text": "💊 تحديث دوائي (MAR)\nالقسم: {department}\nالمريض: {patient_initials} ({mrn})\nالتفاصيل: {note}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  },
+  "DAPS": {
+    "telegram": {
+      "text": "📋 خطة/تقييم (DAPS)\nالقسم: {department}\nالمريض: {patient_initials} ({mrn})\nالملخص: {note}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  },
+  "LABS": {
+    "telegram": {
+      "text": "🧪 نتيجة مختبر\nالقسم: {department}\nالمريض: {patient_initials} ({mrn})\nالفحص: {lab_name}\nالقيمة: {value}{unit}\nملاحظات: {note}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  },
+  "MICRO BIOLOGY": {
+    "telegram": {
+      "text": "🧫 Micro Biology\nالقسم: {department}\nالمريض: {patient_initials} ({mrn})\nالعينة/الزرع: {sample}\nالنتيجة/الممرض: {organism}\nملاحظات: {note}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  },
+  "EMAGING (MRI-ICT)": {
+    "telegram": {
+      "text": "🧲 Imaging (MRI/CT)\nالقسم: {department}\nالمريض: {patient_initials} ({mrn})\nالإجراء: {modality}\nالنتيجة: {note}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  },
+  "X-Ray": {
+    "telegram": {
+      "text": "📷 X-Ray\nالقسم: {department}\nالمريض: {patient_initials} ({mrn})\nالنتيجة: {note}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  },
+  "Documentation from physician": {
+    "telegram": {
+      "text": "📝 توثيق من الطبيب\nالقسم: {department}\nالمريض: {patient_initials} ({mrn})\nالملخص: {note}\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  },
+  "default": {
+    "telegram": {
+      "text": "📣 تحديث\nالقسم: {department}\nالنوع: {event_type}\nالمريض: {patient_initials} ({mrn})\n🕒 {timestamp}\n🔗 {link_to_chart}"
+    }
+  }
+}

@@ -185,7 +185,7 @@ def render_from_template(row: EventRow, templates: dict) -> Optional[str]:
     if not text_tmpl:
         return None
     try:
-        return text_tmpl.format(**row.data)
+        return text_tmpl.format_map(SafeDict(row.data))
     except Exception:
         # Missing placeholders → fallback to simple
         return None

@@ -1,7 +1,6 @@
-# This code was made by Zayed Al Zayed for Hackathon participation.
+# By Zayed Al Zayed
 # Zayed1@gmail.com 
 # http://linkedin.com/in/zayedab
-#
 
 
 from __future__ import annotations
@@ -327,7 +326,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-# This code was made by Zayed Al Zayed for Hackathon participation.
+
 # Zayed1@gmail.com 
 # http://linkedin.com/in/zayedab
 #

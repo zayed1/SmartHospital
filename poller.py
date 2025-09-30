@@ -1,5 +1,8 @@
+# This code was made by Zayed Al Zayed for Hackathon participation.
+# Zayed1@gmail.com 
+# http://linkedin.com/in/zayedab
+#
 
-#----------- By Zayed Al Zayed -----------#
 
 from __future__ import annotations
 """

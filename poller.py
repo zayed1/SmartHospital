@@ -1,15 +1,14 @@
 
+#----------- By Zayed Al Zayed -----------#
+
 from __future__ import annotations
 """
-poller.py — tolerant template lookup & BOM-safe CSV
 
-What's new vs previous version:
+Features
 - Strips BOM/RTL marks from CSV keys/values (common with Google Sheets CSV)
 - Normalizes event_type for lookup: trims, collapses spaces, removes BOM, case-insensitive match
 - Builds an index of templates by normalized key; still preserves original behavior when exact match exists
 - Adds detailed debug logs when default template is used due to a miss
-
-Other behavior unchanged:
 - Fetch CSVs to DATA_DIR, process updates.csv, dedupe via id or dept|event|timestamp
 - Send to Telegram per TELEGRAM_CHAT_IDS
 - Save state to STATE_JSON; trim to last 50k
@@ -325,3 +324,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+# This code was made by Zayed Al Zayed for Hackathon participation.
+# Zayed1@gmail.com 
+# http://linkedin.com/in/zayedab
+#
